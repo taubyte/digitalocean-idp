@@ -2,3 +2,8 @@ config/
 dist/
 node_modules/
 example/
+
+# Environment variables
+.env
+.env.*
+!.env.example

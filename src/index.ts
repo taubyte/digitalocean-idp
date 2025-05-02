@@ -1,3 +1,6 @@
+import dotenv from "dotenv";
+dotenv.config();
+
 import {
   Config,
   CourseConfig,
@@ -5,6 +8,7 @@ import {
   TauLatest,
   Course,
 } from "@taubyte/spore-drive";
+
 
 import { Droplets, DropletInfo } from "./do";
 import NamecheapDnsClient from "./namecheap";
@@ -18,6 +22,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 import { ProgressBar } from "@opentf/cli-pbar";
+
+const DOMAIN = process.env.DOMAIN!;
+const DOMAIN_GENERATED = process.env.DOMAIN_GENERATED!;
+const DROPLET_ROOT_PASSWORD = process.env.DROPLET_ROOT_PASSWORD!;
+const NAMECHEAP_USERNAME = process.env.NAMECHEAP_USERNAME;
+const NAMECHEAP_API_KEY = process.env.NAMECHEAP_API_KEY;
+const NAMECHEAP_IP = process.env.NAMECHEAP_IP;
 
 function extractHost(path: string): string {
   const match = path.match(/\/([^\/]+):\d+/);
@@ -76,54 +87,54 @@ async function displayProgress(course: Course) {
 }
 
 export const createConfig = async (config: Config) => {
-  await config.Cloud().Domain().Root().Set("pom.ac");
-  await config.Cloud().Domain().Generated().Set("g.pom.ac");
+  await config.cloud.domain.root.set(DOMAIN);
+  await config.cloud.domain.generated.set(DOMAIN_GENERATED);
 
   try {
-    await config.Cloud().Domain().Validation().Keys().Data().PrivateKey().Get();
+    await config.cloud.domain.validation.keys.data.privateKey.get();
   } catch {
-    await config.Cloud().Domain().Validation().Generate();
+    await config.cloud.domain.validation.generate();
   }
 
   try {
-    await config.Cloud().P2P().Swarm().Key().Data().Get();
+    await config.cloud.p2p.swarm.key.data.get();
   } catch {
-    await config.Cloud().P2P().Swarm().Generate();
+    await config.cloud.p2p.swarm.generate();
   }
 
-  const mainAuth = config.Auth().Signer("main");
-  await mainAuth.Username().Set("root");
-  await mainAuth.Password().Set(process.env.DROPLET_ROOT_PASSWORD!);
+  const mainAuth = config.auth.signer["main"];
+  await mainAuth.username.set("root");
+  await mainAuth.password.set(DROPLET_ROOT_PASSWORD);
 
-  const all = config.Shapes().Shape("all");
+  const all = config.shapes.get("all");
   await all
-    .Services()
-    .Set(["auth", "tns", "hoarder", "seer", "substrate", "patrick", "monkey"]);
-  await all.Ports().Port("main").Set(BigInt(4242));
-  await all.Ports().Port("lite").Set(BigInt(4262));
+    .services
+    .set(["auth", "tns", "hoarder", "seer", "substrate", "patrick", "monkey"]);
+  await all.ports.port["main"].set(4242);
+  await all.ports.port["lite"].set(4262);
 
-  const hosts = await config.Hosts().List();
+  const hosts = await config.hosts.list();
 
   const bootstrapers = [];
 
   for (const droplet of await Droplets()) {
     const { hostname, publicIp, tags } = DropletInfo(droplet);
     if (!hosts.includes(hostname)) {
-      const host = config.Hosts().Host(hostname);
+      const host = config.hosts.get(hostname);
       bootstrapers.push(hostname);
 
-      await host.Addresses().Add([`${publicIp}/32`]);
-      await host.SSH().Address().Set(`${publicIp}:22`);
-      await host.SSH().Auth().Add(["main"]);
-      await host.Location().Set("40.730610, -73.935242");
-      if (!(await host.Shapes().List()).includes("all"))
-        await host.Shapes().Shape("all").Instance().Generate();
+      await host.addresses.add([`${publicIp}/32`]);
+      await host.ssh.address.set(`${publicIp}:22`);
+      await host.ssh.auth.add(["main"]);
+      await host.location.set("40.730610, -73.935242");
+      if (!(await host.shapes.list()).includes("all"))
+        await host.shapes.get("all").generate();
     }
   }
 
-  await config.Cloud().P2P().Bootstrap().Shape("all").Nodes().Add(bootstrapers);
+  await config.cloud.p2p.bootstrap.shape["all"].nodes.add(bootstrapers);
 
-  await config.Commit();
+  await config.commit();
 };
 
 function extractIpFromCidr(cidr: string): string {
@@ -131,10 +142,10 @@ function extractIpFromCidr(cidr: string): string {
 }
 
 export const fixDNS = async (config: Config): Promise<boolean> => {
-  const apiUser = process.env.NAMECHEAP_USERNAME;
-  const apiKey = process.env.NAMECHEAP_API_KEY;
-  const clientIp = process.env.NAMECHEAP_IP;
-  const domain = "pom.ac";
+  const apiUser = NAMECHEAP_USERNAME;
+  const apiKey = NAMECHEAP_API_KEY;
+  const clientIp = NAMECHEAP_IP;
+  const domain = DOMAIN;
 
   if (!apiUser && !apiKey && !clientIp) {
     return false; // skip
@@ -145,13 +156,9 @@ export const fixDNS = async (config: Config): Promise<boolean> => {
   }
 
   const seerAddrs = [];
-  for (const hostname of await config.Hosts().List()) {
-    if ((await config.Hosts().Host(hostname).Shapes().List()).includes("all")) {
-      for (const addr of await config
-        .Hosts()
-        .Host(hostname)
-        .Addresses()
-        .List()) {
+  for (const hostname of await config.hosts.list()) {
+    if ((await config.hosts.get(hostname).shapes.list()).includes("all")) {
+      for (const addr of await config.hosts.get(hostname).addresses.list()) {
         seerAddrs.push(extractIpFromCidr(addr));
       }
     }
@@ -169,9 +176,9 @@ export const fixDNS = async (config: Config): Promise<boolean> => {
 
   client.setAll("seer", "A", seerAddrs);
 
-  client.setAll("tau", "NS", ["seer.pom.ac."]);
+  client.setAll("tau", "NS", ["seer."+DOMAIN]);
 
-  client.setAll("*.g", "CNAME", ["substrate.tau.pom.ac."]);
+  client.setAll("*.g", "CNAME", ["substrate.tau."+DOMAIN]);
 
   await client.commit();
 
